@@ -34,8 +34,8 @@ const canonical = new URL(Astro.url.pathname, 'https://qr.oriz.in').toString()
       <nav>
         <a href="/">tools</a>
         <a href="/about/">about</a>
-        <a href="/pricing/">pricing</a>
-        <a href="https://auth.oriz.in/sign-in">sign in</a>
+        <a href="https://oriz.in/pricing?from=oriz-grid-qr-tools-app">pricing</a>
+        <a href="https://account.oriz.in/sign-in?return=https://qr.oriz.in/">sign in</a>
       </nav>
     </header>
     <main id="main"><slot /></main>
@@ -45,5 +45,8 @@ const canonical = new URL(Astro.url.pathname, 'https://qr.oriz.in').toString()
         <a href="/about/">about</a> · <a href="/contact/">contact</a> · <a href="/legal/privacy/">privacy</a> · <a href="/legal/terms/">terms</a> · <a href="/legal/disclaimer/">disclaimer</a>
       </span>
     </footer>
+    <style>
+      nav a { min-height: 32px; padding: 6px 0; display: inline-flex; align-items: center; }
+    </style>
   </body>
 </html>
