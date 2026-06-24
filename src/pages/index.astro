@@ -1,24 +1,23 @@
 ---
 /*
- * Oriz QR & Barcode Tools — v0. Feature grid. Each feature is wired as a card; the
- * first one or two work end-to-end, the rest are stubs marked "Coming v0.1".
- *
- * Design: modules · finder patterns · checksums — palette + type stack chosen to match the subject.
+ * Oriz QR & Barcode Tools — v0.1 Feature grid.
+ * All four core tools are now fully implemented client-side.
  */
 import BaseLayout from '~/layouts/BaseLayout.astro'
 
 const features = [
-    { slug: 'qr-text', label: "QR from text / URL" },
+    { slug: 'qr-text', label: "QR generator (text / URL)", ready: true },
+    { slug: 'qr-scan', label: "QR decoder (camera / file)", ready: true },
+    { slug: 'barcode', label: "Barcode generator (Code-128, EAN-13, QR)", ready: true },
+    { slug: 'url-preview', label: "URL shortener preview", ready: true },
     { slug: 'qr-vcard', label: "QR vCard" },
     { slug: 'qr-wifi', label: "QR WiFi credentials" },
     { slug: 'qr-email', label: "QR email / SMS / phone" },
     { slug: 'qr-geo', label: "QR geo / event" },
-    { slug: 'qr-styled', label: "styled QR with logo" },
-    { slug: 'qr-scan', label: "scan QR (webcam)" },
-    { slug: 'qr-bulk', label: "bulk CSV → ZIP of QR PNGs" },
-    { slug: 'barcode', label: "barcodes: Code-128, EAN-13, UPC, ITF, MSI" },
+    { slug: 'qr-styled', label: "Styled QR with logo" },
+    { slug: 'qr-bulk', label: "Bulk CSV → ZIP of QR PNGs" },
 ]
-const totalFeatures = features.length
+const readyCount = features.filter(f => f.ready).length
 ---
 <BaseLayout>
   <article class="home">
@@ -26,7 +25,11 @@ const totalFeatures = features.length
       <p class="eyebrow smallcaps">modules · finder patterns · checksums</p>
       <h1 class="h1">Pixels carry payload. Generated, scanned, and saved in your browser.</h1>
       <p class="lede">QR + barcode suite: generate, style, scan, bulk-batch. vCard, WiFi, geo, event. Code-128, EAN-13, UPC, ITF, MSI.</p>
-      <p class="meta mono">{totalFeatures} tools · 0 bytes uploaded · runs locally · MIT</p>
+      <p class="meta mono">{readyCount} tools ready · 0 bytes uploaded · runs locally · MIT</p>
+      <div class="cta-row">
+        <a href="https://account.oriz.in/sign-in?return=https://qr.oriz.in/" class="btn-secondary">Sign in</a>
+        <a href="https://oriz.in/pricing?app=grid-qr&return=https://qr.oriz.in/" class="btn-primary">Upgrade to Pro</a>
+      </div>
     </header>
 
     <section class="grid" aria-label="Feature index">
@@ -34,7 +37,7 @@ const totalFeatures = features.length
         <a href={`/tools/${f.slug}/`} class="card">
           <span class="num mono">{String(i + 1).padStart(2, '0')}</span>
           <span class="label">{f.label}</span>
-          <span class="status mono">{i < 2 ? 'ready' : 'v0.1'}</span>
+          <span class={`status mono${f.ready ? ' ready' : ''}`}>{f.ready ? 'ready' : 'v0.2'}</span>
         </a>
       ))}
     </section>
@@ -71,7 +74,22 @@ const totalFeatures = features.length
     margin: 0 0 1rem;
     max-width: 56ch;
   }
-  .meta { font-size: 12px; color: var(--muted); letter-spacing: 0.06em; }
+  .meta { font-size: 12px; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 1.5rem; }
+
+  .cta-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem; }
+  .btn-primary, .btn-secondary {
+    display: inline-block;
+    padding: 0.5rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    text-decoration: none;
+    border: 1px solid var(--rule);
+    transition: background 120ms, color 120ms;
+  }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover { background: #6d28d9; border-color: #6d28d9; }
+  .btn-secondary { background: var(--paper); color: var(--ink); }
+  .btn-secondary:hover { background: var(--paper-2); }
 
   .grid {
     display: grid;
@@ -98,6 +116,7 @@ const totalFeatures = features.length
   .card .num { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; min-width: 2ch; }
   .card .label { flex: 1; font-size: 0.9375rem; }
   .card .status { font-size: 10px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+  .card .status.ready { color: var(--accent); }
 
   .manifesto {
     padding-block: 1rem;

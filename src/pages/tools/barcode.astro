@@ -1,17 +1,211 @@
 ---
 import BaseLayout from '~/layouts/BaseLayout.astro'
 ---
-<BaseLayout title="barcodes: Code-128, EAN-13, UPC, ITF, MSI — Oriz QR & Barcode Tools" description="barcodes: Code-128, EAN-13, UPC, ITF, MSI — runs in your browser. Part of Oriz QR & Barcode Tools.">
+<BaseLayout title="Barcode Generator — Oriz QR & Barcode Tools" description="Generate Code-128, EAN-13, and QR barcodes in your browser. Download as PNG or SVG.">
   <article class="tool">
     <p class="back mono"><a href="/">← all tools</a></p>
-    <h1 class="h1">barcodes: Code-128, EAN-13, UPC, ITF, MSI</h1>
-    <p class="status mono">coming · v0.1</p>
-    <p class="lede">
-      This feature is on the v0.1 roadmap. The page exists so we can iterate on
-      the design and copy in parallel; the implementation lands next sprint.
-    </p>
+    <h1 class="h1">Barcode Generator</h1>
+    <p class="status mono ready">ready · v0.1</p>
+
+    <div class="layout">
+      <div class="controls">
+        <label class="field">
+          <span class="field-label">Barcode type</span>
+          <select id="bc-type" class="sel">
+            <option value="code128" selected>Code 128</option>
+            <option value="ean13">EAN-13 (13 digits)</option>
+            <option value="qrcode">QR Code</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Content</span>
+          <input id="bc-input" class="io" type="text" placeholder="Type here…" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <div id="ean-hint" class="hint mono" hidden>EAN-13 requires exactly 12 or 13 digits. The 13th (check) digit is auto-calculated.</div>
+
+        <label class="field">
+          <span class="field-label">Scale</span>
+          <select id="bc-scale" class="sel">
+            <option value="2">2×</option>
+            <option value="3" selected>3×</option>
+            <option value="4">4×</option>
+            <option value="6">6×</option>
+          </select>
+        </label>
+
+        <div class="btn-row">
+          <button id="btn-png" class="btn-primary" disabled>Download PNG</button>
+          <button id="btn-svg" class="btn-secondary" disabled>Download SVG</button>
+        </div>
+      </div>
+
+      <div class="preview-wrap" id="preview-wrap">
+        <p id="bc-placeholder" class="placeholder-hint mono">type something to generate</p>
+        <p id="bc-error" class="error-hint mono" hidden></p>
+        <canvas id="bc-canvas" hidden></canvas>
+      </div>
+    </div>
   </article>
 </BaseLayout>
+
+<script>
+// Load bwip-js from CDN
+async function loadBwipJs(): Promise<any> {
+  if ((window as any).bwipjs) return (window as any).bwipjs
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = 'https://unpkg.com/bwip-js@4.5.1/dist/bwip-js-min.js'
+    s.onload = () => resolve((window as any).bwipjs)
+    s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
+
+const typeEl = document.getElementById('bc-type') as HTMLSelectElement
+const inputEl = document.getElementById('bc-input') as HTMLInputElement
+const scaleEl = document.getElementById('bc-scale') as HTMLSelectElement
+const canvas = document.getElementById('bc-canvas') as HTMLCanvasElement
+const placeholder = document.getElementById('bc-placeholder') as HTMLParagraphElement
+const errorEl = document.getElementById('bc-error') as HTMLParagraphElement
+const btnPng = document.getElementById('btn-png') as HTMLButtonElement
+const btnSvg = document.getElementById('btn-svg') as HTMLButtonElement
+const eanHint = document.getElementById('ean-hint') as HTMLDivElement
+
+typeEl.addEventListener('change', () => {
+  eanHint.hidden = typeEl.value !== 'ean13'
+  generate()
+})
+
+let debounce: ReturnType<typeof setTimeout>
+function scheduleGenerate() {
+  clearTimeout(debounce)
+  debounce = setTimeout(generate, 200)
+}
+
+inputEl.addEventListener('input', scheduleGenerate)
+scaleEl.addEventListener('change', generate)
+
+async function generate() {
+  const raw = inputEl.value.trim()
+  if (!raw) {
+    placeholder.hidden = false
+    errorEl.hidden = true
+    canvas.hidden = true
+    btnPng.disabled = true
+    btnSvg.disabled = true
+    return
+  }
+
+  const type = typeEl.value
+  const scale = parseInt(scaleEl.value, 10)
+
+  // EAN-13 validation
+  let content = raw
+  if (type === 'ean13') {
+    const digits = raw.replace(/\D/g, '')
+    if (digits.length < 12 || digits.length > 13) {
+      showError('EAN-13 needs 12 or 13 digits.')
+      return
+    }
+    // auto-calculate check digit if 12 given
+    if (digits.length === 12) {
+      let sum = 0
+      for (let i = 0; i < 12; i++) sum += parseInt(digits[i]) * (i % 2 === 0 ? 1 : 3)
+      const check = (10 - (sum % 10)) % 10
+      content = digits + check
+    } else {
+      content = digits
+    }
+  }
+
+  try {
+    const bwipjs = await loadBwipJs()
+    canvas.hidden = false
+
+    // Map our type names to bwip-js bcid values
+    const bcidMap: Record<string, string> = {
+      code128: 'code128',
+      ean13: 'ean13',
+      qrcode: 'qrcode',
+    }
+
+    bwipjs.toCanvas(canvas, {
+      bcid: bcidMap[type],
+      text: content,
+      scale,
+      includetext: type !== 'qrcode',
+      textxalign: 'center',
+    })
+
+    placeholder.hidden = true
+    errorEl.hidden = true
+    btnPng.disabled = false
+    btnSvg.disabled = false
+  } catch (err: any) {
+    showError(err?.message ?? String(err))
+  }
+}
+
+function showError(msg: string) {
+  errorEl.textContent = `Error: ${msg}`
+  errorEl.hidden = false
+  placeholder.hidden = true
+  canvas.hidden = true
+  btnPng.disabled = true
+  btnSvg.disabled = true
+}
+
+btnPng.addEventListener('click', () => {
+  const url = canvas.toDataURL('image/png')
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `barcode-${typeEl.value}.png`
+  a.click()
+})
+
+btnSvg.addEventListener('click', async () => {
+  const type = typeEl.value
+  const raw = inputEl.value.trim()
+  if (!raw) return
+
+  let content = raw
+  if (type === 'ean13') {
+    const digits = raw.replace(/\D/g, '')
+    if (digits.length === 12) {
+      let sum = 0
+      for (let i = 0; i < 12; i++) sum += parseInt(digits[i]) * (i % 2 === 0 ? 1 : 3)
+      const check = (10 - (sum % 10)) % 10
+      content = digits + check
+    } else {
+      content = digits
+    }
+  }
+
+  try {
+    const bwipjs = await loadBwipJs()
+    const bcidMap: Record<string, string> = { code128: 'code128', ean13: 'ean13', qrcode: 'qrcode' }
+    const scale = parseInt(scaleEl.value, 10)
+    const svgStr = bwipjs.toSVG({
+      bcid: bcidMap[type],
+      text: content,
+      scale,
+      includetext: type !== 'qrcode',
+      textxalign: 'center',
+    })
+    const blob = new Blob([svgStr], { type: 'image/svg+xml' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `barcode-${type}.svg`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (err: any) {
+    showError(err?.message ?? String(err))
+  }
+})
+</script>
 
 <style>
   .tool { padding-block: 0 2rem; }
@@ -21,18 +215,75 @@ import BaseLayout from '~/layouts/BaseLayout.astro'
   .h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(1.75rem, 4vw, 2.5rem); margin: 0 0 0.5rem; line-height: 1.1; }
   .status { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 2rem; }
   .status.ready { color: var(--accent); }
-  .lede { font-size: 1rem; color: var(--muted); line-height: 1.6; max-width: 56ch; }
-  .placeholder { max-width: 60ch; }
-  .placeholder p { color: var(--muted); margin: 0 0 1rem; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+  @media (min-width: 700px) {
+    .layout { grid-template-columns: 1fr 1fr; align-items: start; }
+  }
+
+  .controls { display: flex; flex-direction: column; gap: 1.25rem; }
+
+  .field { display: flex; flex-direction: column; gap: 0.35rem; }
+  .field-label { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; font-family: var(--font-mono); }
+
   .io {
     width: 100%;
-    padding: 1rem;
+    padding: 0.625rem 0.875rem;
     background: var(--paper-2);
     border: 1px solid var(--rule);
     color: var(--ink);
     font-family: var(--font-mono);
     font-size: 0.875rem;
-    resize: vertical;
   }
-  .hint { font-size: 11px; color: var(--muted); margin-top: 0.75rem; }
+  .io:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .sel {
+    padding: 0.5rem 0.75rem;
+    background: var(--paper-2);
+    border: 1px solid var(--rule);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    appearance: none;
+    cursor: pointer;
+  }
+  .sel:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .hint { font-size: 11px; color: var(--muted); line-height: 1.6; letter-spacing: 0.03em; }
+
+  .btn-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  .btn-primary, .btn-secondary {
+    padding: 0.5rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    border: 1px solid var(--rule);
+    cursor: pointer;
+    transition: background 120ms;
+  }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover:not(:disabled) { background: #6d28d9; }
+  .btn-secondary { background: var(--paper-2); color: var(--ink); }
+  .btn-secondary:hover:not(:disabled) { background: var(--rule); color: var(--paper); }
+  .btn-primary:disabled, .btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .preview-wrap {
+    border: 1px solid var(--rule);
+    background: var(--paper-2);
+    padding: 1.5rem;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow-x: auto;
+  }
+
+  #bc-canvas { max-width: 100%; }
+
+  .placeholder-hint { font-size: 12px; color: var(--muted); letter-spacing: 0.08em; margin: 0; }
+  .error-hint { font-size: 12px; color: #dc2626; margin: 0; text-align: center; }
 </style>

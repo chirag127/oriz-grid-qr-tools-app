@@ -1,18 +1,115 @@
 ---
 import BaseLayout from '~/layouts/BaseLayout.astro'
 ---
-<BaseLayout title="QR vCard — Oriz QR & Barcode Tools" description="QR vCard — runs in your browser. Part of Oriz QR & Barcode Tools.">
+<BaseLayout title="QR vCard — Oriz QR & Barcode Tools" description="Generate a vCard 3.0 contact QR code. Scan it to add the contact in one tap. Runs entirely in your browser.">
   <article class="tool">
     <p class="back mono"><a href="/">← all tools</a></p>
     <h1 class="h1">QR vCard</h1>
-    <p class="status mono ready">ready · v0</p>
-    <div class="placeholder">
-      <p>This tool is wired. Drop in your input or paste below — everything stays in your browser.</p>
-      <textarea class="io" placeholder="paste input here…" rows="8"></textarea>
-      <p class="hint mono">v0 = UI present + core path wired. Full feature set lands in v0.1.</p>
+    <p class="status mono ready">ready · v0.1</p>
+    <p class="lede">Encode a contact card (vCard 3.0). Scan the QR — the phone offers to save it directly to contacts.</p>
+
+    <div class="layout">
+      <div class="controls">
+        <label class="field"><span class="field-label">First name</span><input id="fn" class="io" /></label>
+        <label class="field"><span class="field-label">Last name</span><input id="ln" class="io" /></label>
+        <label class="field"><span class="field-label">Organization</span><input id="org" class="io" /></label>
+        <label class="field"><span class="field-label">Title</span><input id="title" class="io" /></label>
+        <label class="field"><span class="field-label">Phone</span><input id="phone" class="io" type="tel" /></label>
+        <label class="field"><span class="field-label">Email</span><input id="email" class="io" type="email" /></label>
+        <label class="field"><span class="field-label">Website</span><input id="url" class="io" type="url" /></label>
+        <label class="field"><span class="field-label">Address</span><input id="addr" class="io" /></label>
+        <div class="btn-row">
+          <button id="btn-png" class="btn-primary" disabled>Download PNG</button>
+          <button id="btn-svg" class="btn-secondary" disabled>Download SVG</button>
+          <button id="btn-vcf" class="btn-secondary" disabled>Download .vcf</button>
+        </div>
+      </div>
+      <div class="preview-wrap">
+        <canvas id="qr-canvas" width="320" height="320"></canvas>
+        <p id="qr-placeholder" class="placeholder-hint mono">enter a name to generate</p>
+        <p id="qr-error" class="error-hint mono" hidden></p>
+      </div>
     </div>
   </article>
 </BaseLayout>
+
+<script>
+let QRCode: any = null
+async function loadQRCode() {
+  if (QRCode) return QRCode
+  return new Promise<any>((resolve, reject) => {
+    if ((window as any).QRCode) { QRCode = (window as any).QRCode; resolve(QRCode); return }
+    const s = document.createElement('script')
+    s.src = 'https://unpkg.com/qrcode@1.5.4/build/qrcode.min.js'
+    s.onload = () => { QRCode = (window as any).QRCode; resolve(QRCode) }
+    s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
+
+const v = (id: string) => (document.getElementById(id) as HTMLInputElement).value.trim()
+const esc = (s: string) => s.replace(/([\\;,])/g, '\\$1').replace(/\n/g, '\\n')
+
+function vcard() {
+  const ln = esc(v('ln')), fn = esc(v('fn'))
+  const lines = ['BEGIN:VCARD', 'VERSION:3.0']
+  lines.push(`N:${ln};${fn};;;`)
+  lines.push(`FN:${esc((v('fn') + ' ' + v('ln')).trim())}`)
+  if (v('org')) lines.push(`ORG:${esc(v('org'))}`)
+  if (v('title')) lines.push(`TITLE:${esc(v('title'))}`)
+  if (v('phone')) lines.push(`TEL;TYPE=CELL:${esc(v('phone'))}`)
+  if (v('email')) lines.push(`EMAIL:${esc(v('email'))}`)
+  if (v('url')) lines.push(`URL:${esc(v('url'))}`)
+  if (v('addr')) lines.push(`ADR:;;${esc(v('addr'))};;;;`)
+  lines.push('END:VCARD')
+  return lines.join('\r\n')
+}
+
+const canvas = document.getElementById('qr-canvas') as HTMLCanvasElement
+const placeholder = document.getElementById('qr-placeholder') as HTMLParagraphElement
+const errorEl = document.getElementById('qr-error') as HTMLParagraphElement
+const btnPng = document.getElementById('btn-png') as HTMLButtonElement
+const btnSvg = document.getElementById('btn-svg') as HTMLButtonElement
+const btnVcf = document.getElementById('btn-vcf') as HTMLButtonElement
+let lastSvg = '', lastVcf = ''
+let timer: ReturnType<typeof setTimeout>
+
+async function gen() {
+  const hasName = v('fn') || v('ln')
+  if (!hasName) {
+    placeholder.hidden = false; errorEl.hidden = true
+    canvas.style.display = 'none'
+    btnPng.disabled = btnSvg.disabled = btnVcf.disabled = true
+    return
+  }
+  try {
+    const QR = await loadQRCode()
+    lastVcf = vcard()
+    await QR.toCanvas(canvas, lastVcf, { width: 320, errorCorrectionLevel: 'M', margin: 2 })
+    lastSvg = await QR.toString(lastVcf, { type: 'svg', width: 320, errorCorrectionLevel: 'M', margin: 2 })
+    placeholder.hidden = true; errorEl.hidden = true
+    canvas.style.display = 'block'
+    btnPng.disabled = btnSvg.disabled = btnVcf.disabled = false
+  } catch (e: any) {
+    errorEl.textContent = `Error: ${e?.message ?? String(e)}`; errorEl.hidden = false
+    placeholder.hidden = true; canvas.style.display = 'none'
+  }
+}
+
+const schedule = () => { clearTimeout(timer); timer = setTimeout(gen, 200) }
+document.querySelectorAll<HTMLInputElement>('.controls input').forEach(i => i.addEventListener('input', schedule))
+
+function download(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+btnPng.addEventListener('click', () => {
+  const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = 'vcard.png'; a.click()
+})
+btnSvg.addEventListener('click', () => download(new Blob([lastSvg], { type: 'image/svg+xml' }), 'vcard.svg'))
+btnVcf.addEventListener('click', () => download(new Blob([lastVcf], { type: 'text/vcard' }), 'contact.vcf'))
+</script>
 
 <style>
   .tool { padding-block: 0 2rem; }
@@ -20,20 +117,23 @@ import BaseLayout from '~/layouts/BaseLayout.astro'
   .back a { color: var(--muted); text-decoration: none; }
   .back a:hover { color: var(--ink); }
   .h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(1.75rem, 4vw, 2.5rem); margin: 0 0 0.5rem; line-height: 1.1; }
-  .status { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 2rem; }
+  .status { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 1rem; }
   .status.ready { color: var(--accent); }
-  .lede { font-size: 1rem; color: var(--muted); line-height: 1.6; max-width: 56ch; }
-  .placeholder { max-width: 60ch; }
-  .placeholder p { color: var(--muted); margin: 0 0 1rem; }
-  .io {
-    width: 100%;
-    padding: 1rem;
-    background: var(--paper-2);
-    border: 1px solid var(--rule);
-    color: var(--ink);
-    font-family: var(--font-mono);
-    font-size: 0.875rem;
-    resize: vertical;
-  }
-  .hint { font-size: 11px; color: var(--muted); margin-top: 0.75rem; }
+  .lede { font-size: 1rem; color: var(--muted); line-height: 1.6; max-width: 56ch; margin: 0 0 2rem; }
+  .layout { display: grid; grid-template-columns: 1fr; gap: 2rem; }
+  @media (min-width: 700px) { .layout { grid-template-columns: 1fr 1fr; align-items: start; } }
+  .controls { display: flex; flex-direction: column; gap: 0.85rem; }
+  .field { display: flex; flex-direction: column; gap: 0.3rem; }
+  .field-label { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; font-family: var(--font-mono); }
+  .io { width: 100%; padding: 0.55rem 0.8rem; background: var(--paper-2); border: 1px solid var(--rule); color: var(--ink); font-family: var(--font-mono); font-size: 0.875rem; }
+  .io:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+  .btn-primary, .btn-secondary { padding: 0.5rem 1rem; font-family: var(--font-mono); font-size: 0.8rem; border: 1px solid var(--rule); cursor: pointer; }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-secondary { background: var(--paper-2); color: var(--ink); }
+  .btn-primary:disabled, .btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .preview-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 320px; border: 1px solid var(--rule); background: var(--paper-2); padding: 1.5rem; position: sticky; top: 1rem; }
+  #qr-canvas { display: none; max-width: 100%; image-rendering: pixelated; }
+  .placeholder-hint { font-size: 12px; color: var(--muted); letter-spacing: 0.08em; margin: 0; text-align: center; }
+  .error-hint { font-size: 12px; color: #dc2626; margin: 0; text-align: center; }
 </style>

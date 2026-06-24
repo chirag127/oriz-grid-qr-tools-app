@@ -1,18 +1,180 @@
 ---
 import BaseLayout from '~/layouts/BaseLayout.astro'
 ---
-<BaseLayout title="QR from text / URL — Oriz QR & Barcode Tools" description="QR from text / URL — runs in your browser. Part of Oriz QR & Barcode Tools.">
+<BaseLayout title="QR Generator — Oriz QR & Barcode Tools" description="Generate QR codes from text or URLs. Choose size, error correction level, and colors. Download as PNG or SVG. Runs entirely in your browser.">
   <article class="tool">
     <p class="back mono"><a href="/">← all tools</a></p>
-    <h1 class="h1">QR from text / URL</h1>
-    <p class="status mono ready">ready · v0</p>
-    <div class="placeholder">
-      <p>This tool is wired. Drop in your input or paste below — everything stays in your browser.</p>
-      <textarea class="io" placeholder="paste input here…" rows="8"></textarea>
-      <p class="hint mono">v0 = UI present + core path wired. Full feature set lands in v0.1.</p>
+    <h1 class="h1">QR Generator</h1>
+    <p class="status mono ready">ready · v0.1</p>
+
+    <div class="layout">
+      <div class="controls">
+        <label class="field">
+          <span class="field-label">Text / URL</span>
+          <textarea id="qr-input" class="io" placeholder="https://oriz.in" rows="3" autocomplete="off" spellcheck="false"></textarea>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Size</span>
+          <select id="qr-size" class="sel">
+            <option value="128">128 × 128 px</option>
+            <option value="256" selected>256 × 256 px</option>
+            <option value="512">512 × 512 px</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Error correction</span>
+          <select id="qr-ecl" class="sel">
+            <option value="L">L — Low (~7%)</option>
+            <option value="M" selected>M — Medium (~15%)</option>
+            <option value="Q">Q — Quartile (~25%)</option>
+            <option value="H">H — High (~30%)</option>
+          </select>
+        </label>
+
+        <div class="color-row">
+          <label class="field">
+            <span class="field-label">Foreground</span>
+            <input type="color" id="qr-fg" value="#000000" class="color-inp" />
+          </label>
+          <label class="field">
+            <span class="field-label">Background</span>
+            <input type="color" id="qr-bg" value="#ffffff" class="color-inp" />
+          </label>
+        </div>
+
+        <div class="btn-row">
+          <button id="btn-png" class="btn-primary" disabled>Download PNG</button>
+          <button id="btn-svg" class="btn-secondary" disabled>Download SVG</button>
+        </div>
+      </div>
+
+      <div class="preview-wrap">
+        <canvas id="qr-canvas" width="256" height="256"></canvas>
+        <p id="qr-placeholder" class="placeholder-hint mono">type something to generate</p>
+        <p id="qr-error" class="error-hint mono" hidden></p>
+      </div>
     </div>
   </article>
 </BaseLayout>
+
+<script>
+// Load qrcode from CDN (ESM-compatible UMD via unpkg)
+// We use a dynamic script tag because qrcode doesn't ship an ES module
+let QRCode: any = null
+
+async function loadQRCode() {
+  if (QRCode) return QRCode
+  return new Promise<any>((resolve, reject) => {
+    if ((window as any).QRCode) { QRCode = (window as any).QRCode; resolve(QRCode); return }
+    const s = document.createElement('script')
+    s.src = 'https://unpkg.com/qrcode@1.5.4/build/qrcode.min.js'
+    s.onload = () => { QRCode = (window as any).QRCode; resolve(QRCode) }
+    s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
+
+const input = document.getElementById('qr-input') as HTMLTextAreaElement
+const sizeEl = document.getElementById('qr-size') as HTMLSelectElement
+const eclEl = document.getElementById('qr-ecl') as HTMLSelectElement
+const fgEl = document.getElementById('qr-fg') as HTMLInputElement
+const bgEl = document.getElementById('qr-bg') as HTMLInputElement
+const canvas = document.getElementById('qr-canvas') as HTMLCanvasElement
+const placeholder = document.getElementById('qr-placeholder') as HTMLParagraphElement
+const errorEl = document.getElementById('qr-error') as HTMLParagraphElement
+const btnPng = document.getElementById('btn-png') as HTMLButtonElement
+const btnSvg = document.getElementById('btn-svg') as HTMLButtonElement
+
+let debounceTimer: ReturnType<typeof setTimeout>
+let lastSvgData = ''
+
+async function generate() {
+  const text = input.value.trim()
+  if (!text) {
+    placeholder.hidden = false
+    errorEl.hidden = true
+    canvas.style.display = 'none'
+    btnPng.disabled = true
+    btnSvg.disabled = true
+    return
+  }
+
+  const size = parseInt(sizeEl.value, 10)
+  const ecl = eclEl.value as 'L' | 'M' | 'Q' | 'H'
+  const fg = fgEl.value
+  const bg = bgEl.value
+
+  try {
+    const QR = await loadQRCode()
+    // resize canvas
+    canvas.width = size
+    canvas.height = size
+
+    await QR.toCanvas(canvas, text, {
+      width: size,
+      errorCorrectionLevel: ecl,
+      color: { dark: fg, light: bg },
+      margin: 2,
+    })
+
+    // Also generate SVG string for SVG download
+    lastSvgData = await QR.toString(text, {
+      type: 'svg',
+      width: size,
+      errorCorrectionLevel: ecl,
+      color: { dark: fg, light: bg },
+      margin: 2,
+    })
+
+    placeholder.hidden = true
+    errorEl.hidden = true
+    canvas.style.display = 'block'
+    btnPng.disabled = false
+    btnSvg.disabled = false
+  } catch (err: any) {
+    errorEl.textContent = `Error: ${err?.message ?? String(err)}`
+    errorEl.hidden = false
+    placeholder.hidden = true
+    canvas.style.display = 'none'
+    btnPng.disabled = true
+    btnSvg.disabled = true
+  }
+}
+
+function scheduleGenerate() {
+  clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(generate, 150)
+}
+
+input.addEventListener('input', scheduleGenerate)
+sizeEl.addEventListener('change', generate)
+eclEl.addEventListener('change', generate)
+fgEl.addEventListener('input', scheduleGenerate)
+bgEl.addEventListener('input', scheduleGenerate)
+
+btnPng.addEventListener('click', () => {
+  const url = canvas.toDataURL('image/png')
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'qrcode.png'
+  a.click()
+})
+
+btnSvg.addEventListener('click', () => {
+  const blob = new Blob([lastSvgData], { type: 'image/svg+xml' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'qrcode.svg'
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+})
+
+// Generate immediately if there's a pre-filled value
+if (input.value.trim()) generate()
+</script>
 
 <style>
   .tool { padding-block: 0 2rem; }
@@ -22,12 +184,24 @@ import BaseLayout from '~/layouts/BaseLayout.astro'
   .h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(1.75rem, 4vw, 2.5rem); margin: 0 0 0.5rem; line-height: 1.1; }
   .status { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 2rem; }
   .status.ready { color: var(--accent); }
-  .lede { font-size: 1rem; color: var(--muted); line-height: 1.6; max-width: 56ch; }
-  .placeholder { max-width: 60ch; }
-  .placeholder p { color: var(--muted); margin: 0 0 1rem; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+  @media (min-width: 700px) {
+    .layout { grid-template-columns: 1fr 1fr; align-items: start; }
+  }
+
+  .controls { display: flex; flex-direction: column; gap: 1.25rem; }
+
+  .field { display: flex; flex-direction: column; gap: 0.35rem; }
+  .field-label { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; font-family: var(--font-mono); }
+
   .io {
     width: 100%;
-    padding: 1rem;
+    padding: 0.75rem 1rem;
     background: var(--paper-2);
     border: 1px solid var(--rule);
     color: var(--ink);
@@ -35,5 +209,69 @@ import BaseLayout from '~/layouts/BaseLayout.astro'
     font-size: 0.875rem;
     resize: vertical;
   }
-  .hint { font-size: 11px; color: var(--muted); margin-top: 0.75rem; }
+  .io:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .sel {
+    padding: 0.5rem 0.75rem;
+    background: var(--paper-2);
+    border: 1px solid var(--rule);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    appearance: none;
+    cursor: pointer;
+  }
+  .sel:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .color-row { display: flex; gap: 1rem; }
+  .color-inp {
+    width: 3rem;
+    height: 2rem;
+    padding: 0;
+    border: 1px solid var(--rule);
+    background: none;
+    cursor: pointer;
+  }
+
+  .btn-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  .btn-primary, .btn-secondary {
+    padding: 0.5rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    border: 1px solid var(--rule);
+    cursor: pointer;
+    transition: background 120ms;
+  }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover:not(:disabled) { background: #6d28d9; }
+  .btn-secondary { background: var(--paper-2); color: var(--ink); }
+  .btn-secondary:hover:not(:disabled) { background: var(--rule); color: var(--paper); }
+  .btn-primary:disabled, .btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .preview-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 260px;
+    border: 1px solid var(--rule);
+    background: var(--paper-2);
+    padding: 1.5rem;
+  }
+
+  #qr-canvas { display: none; max-width: 100%; image-rendering: pixelated; }
+
+  .placeholder-hint {
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    margin: 0;
+    text-align: center;
+  }
+  .error-hint {
+    font-size: 12px;
+    color: #dc2626;
+    margin: 0;
+    text-align: center;
+  }
 </style>

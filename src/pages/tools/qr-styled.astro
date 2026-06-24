@@ -1,17 +1,120 @@
 ---
 import BaseLayout from '~/layouts/BaseLayout.astro'
 ---
-<BaseLayout title="styled QR with logo — Oriz QR & Barcode Tools" description="styled QR with logo — runs in your browser. Part of Oriz QR & Barcode Tools.">
+<BaseLayout title="Styled QR with logo — Oriz QR & Barcode Tools" description="Generate a QR code with custom colors and a center logo overlay. Uses high error correction so the logo doesn't break scanning. Runs entirely in your browser.">
   <article class="tool">
     <p class="back mono"><a href="/">← all tools</a></p>
-    <h1 class="h1">styled QR with logo</h1>
-    <p class="status mono">coming · v0.1</p>
-    <p class="lede">
-      This feature is on the v0.1 roadmap. The page exists so we can iterate on
-      the design and copy in parallel; the implementation lands next sprint.
-    </p>
+    <h1 class="h1">Styled QR with logo</h1>
+    <p class="status mono ready">ready · v0.1</p>
+    <p class="lede">Add a center logo to a QR. Uses error correction level <strong>H</strong> (~30%) so the code still scans with a small image covering the middle.</p>
+
+    <div class="layout">
+      <div class="controls">
+        <label class="field"><span class="field-label">Text / URL</span><textarea id="text" class="io" rows="2" placeholder="https://oriz.in"></textarea></label>
+        <div class="color-row">
+          <label class="field"><span class="field-label">Foreground</span><input type="color" id="fg" value="#15140f" class="color-inp" /></label>
+          <label class="field"><span class="field-label">Background</span><input type="color" id="bg" value="#faf6ef" class="color-inp" /></label>
+        </div>
+        <label class="field"><span class="field-label">Logo (PNG/SVG)</span><input type="file" id="logo" class="io" accept="image/*" /></label>
+        <label class="field"><span class="field-label">Logo size <span id="logo-pct" class="mono">20%</span></span><input type="range" id="logo-size" min="10" max="30" value="20" /></label>
+        <label class="check"><input type="checkbox" id="logo-bg" checked /> White pad behind logo</label>
+        <div class="btn-row">
+          <button id="btn-png" class="btn-primary" disabled>Download PNG</button>
+        </div>
+      </div>
+      <div class="preview-wrap">
+        <canvas id="qr-canvas" width="512" height="512"></canvas>
+        <p id="qr-placeholder" class="placeholder-hint mono">enter text to generate</p>
+        <p id="qr-error" class="error-hint mono" hidden></p>
+      </div>
+    </div>
   </article>
 </BaseLayout>
+
+<script>
+let QRCode: any = null
+async function loadQRCode() {
+  if (QRCode) return QRCode
+  return new Promise<any>((resolve, reject) => {
+    if ((window as any).QRCode) { QRCode = (window as any).QRCode; resolve(QRCode); return }
+    const s = document.createElement('script')
+    s.src = 'https://unpkg.com/qrcode@1.5.4/build/qrcode.min.js'
+    s.onload = () => { QRCode = (window as any).QRCode; resolve(QRCode) }
+    s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
+
+const $ = (id: string) => document.getElementById(id) as any
+const text = $('text') as HTMLTextAreaElement
+const fg = $('fg') as HTMLInputElement
+const bg = $('bg') as HTMLInputElement
+const logoIn = $('logo') as HTMLInputElement
+const logoSize = $('logo-size') as HTMLInputElement
+const logoPct = $('logo-pct') as HTMLSpanElement
+const logoBgEl = $('logo-bg') as HTMLInputElement
+const canvas = $('qr-canvas') as HTMLCanvasElement
+const placeholder = $('qr-placeholder') as HTMLParagraphElement
+const errorEl = $('qr-error') as HTMLParagraphElement
+const btnPng = $('btn-png') as HTMLButtonElement
+
+let logoImg: HTMLImageElement | null = null
+let timer: ReturnType<typeof setTimeout>
+
+logoIn.addEventListener('change', () => {
+  const f = logoIn.files?.[0]
+  if (!f) { logoImg = null; gen(); return }
+  const reader = new FileReader()
+  reader.onload = () => {
+    const img = new Image()
+    img.onload = () => { logoImg = img; gen() }
+    img.onerror = () => { errorEl.textContent = 'Could not load image'; errorEl.hidden = false }
+    img.src = reader.result as string
+  }
+  reader.readAsDataURL(f)
+})
+
+logoSize.addEventListener('input', () => { logoPct.textContent = logoSize.value + '%'; gen() })
+logoBgEl.addEventListener('change', gen)
+;[text, fg, bg].forEach(e => e.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(gen, 150) }))
+
+async function gen() {
+  const t = text.value.trim()
+  if (!t) {
+    placeholder.hidden = false; errorEl.hidden = true
+    canvas.style.display = 'none'; btnPng.disabled = true; return
+  }
+  try {
+    const QR = await loadQRCode()
+    const size = 512
+    canvas.width = size; canvas.height = size
+    await QR.toCanvas(canvas, t, { width: size, errorCorrectionLevel: 'H', color: { dark: fg.value, light: bg.value }, margin: 2 })
+    if (logoImg) {
+      const ctx = canvas.getContext('2d')!
+      const pct = parseInt(logoSize.value, 10) / 100
+      const lw = size * pct
+      const lh = lw * (logoImg.height / logoImg.width)
+      const lx = (size - lw) / 2
+      const ly = (size - lh) / 2
+      if (logoBgEl.checked) {
+        const pad = lw * 0.1
+        ctx.fillStyle = bg.value
+        ctx.fillRect(lx - pad, ly - pad, lw + pad * 2, lh + pad * 2)
+      }
+      ctx.drawImage(logoImg, lx, ly, lw, lh)
+    }
+    placeholder.hidden = true; errorEl.hidden = true
+    canvas.style.display = 'block'; btnPng.disabled = false
+  } catch (e: any) {
+    errorEl.textContent = `Error: ${e?.message ?? String(e)}`; errorEl.hidden = false
+    placeholder.hidden = true; canvas.style.display = 'none'; btnPng.disabled = true
+  }
+}
+
+btnPng.addEventListener('click', () => {
+  const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = 'styled-qr.png'; a.click()
+})
+</script>
 
 <style>
   .tool { padding-block: 0 2rem; }
@@ -19,20 +122,25 @@ import BaseLayout from '~/layouts/BaseLayout.astro'
   .back a { color: var(--muted); text-decoration: none; }
   .back a:hover { color: var(--ink); }
   .h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(1.75rem, 4vw, 2.5rem); margin: 0 0 0.5rem; line-height: 1.1; }
-  .status { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 2rem; }
+  .status { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 1rem; }
   .status.ready { color: var(--accent); }
-  .lede { font-size: 1rem; color: var(--muted); line-height: 1.6; max-width: 56ch; }
-  .placeholder { max-width: 60ch; }
-  .placeholder p { color: var(--muted); margin: 0 0 1rem; }
-  .io {
-    width: 100%;
-    padding: 1rem;
-    background: var(--paper-2);
-    border: 1px solid var(--rule);
-    color: var(--ink);
-    font-family: var(--font-mono);
-    font-size: 0.875rem;
-    resize: vertical;
-  }
-  .hint { font-size: 11px; color: var(--muted); margin-top: 0.75rem; }
+  .lede { font-size: 1rem; color: var(--muted); line-height: 1.6; max-width: 56ch; margin: 0 0 2rem; }
+  .layout { display: grid; grid-template-columns: 1fr; gap: 2rem; }
+  @media (min-width: 700px) { .layout { grid-template-columns: 1fr 1fr; align-items: start; } }
+  .controls { display: flex; flex-direction: column; gap: 1rem; }
+  .field { display: flex; flex-direction: column; gap: 0.3rem; }
+  .field-label { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; font-family: var(--font-mono); display: flex; justify-content: space-between; }
+  .io { width: 100%; padding: 0.6rem 0.85rem; background: var(--paper-2); border: 1px solid var(--rule); color: var(--ink); font-family: var(--font-mono); font-size: 0.875rem; }
+  .io:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+  textarea.io { resize: vertical; }
+  .color-row { display: flex; gap: 1rem; }
+  .color-inp { width: 3rem; height: 2rem; padding: 0; border: 1px solid var(--rule); background: none; cursor: pointer; }
+  .check { font-family: var(--font-mono); font-size: 0.875rem; color: var(--muted); display: flex; align-items: center; gap: 0.5rem; }
+  .btn-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  .btn-primary { padding: 0.5rem 1.25rem; font-family: var(--font-mono); font-size: 0.875rem; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .preview-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 280px; border: 1px solid var(--rule); background: var(--paper-2); padding: 1.5rem; }
+  #qr-canvas { display: none; max-width: 100%; height: auto; image-rendering: pixelated; }
+  .placeholder-hint { font-size: 12px; color: var(--muted); letter-spacing: 0.08em; margin: 0; text-align: center; }
+  .error-hint { font-size: 12px; color: #dc2626; margin: 0; text-align: center; }
 </style>

@@ -1,17 +1,264 @@
 ---
 import BaseLayout from '~/layouts/BaseLayout.astro'
 ---
-<BaseLayout title="bulk CSV → ZIP of QR PNGs — Oriz QR & Barcode Tools" description="bulk CSV → ZIP of QR PNGs — runs in your browser. Part of Oriz QR & Barcode Tools.">
+<BaseLayout title="Bulk CSV → ZIP of QR PNGs — Oriz QR & Barcode Tools" description="Paste or upload a CSV: each row becomes one QR PNG, all bundled into a ZIP. Runs entirely in your browser — no upload, no server.">
   <article class="tool">
     <p class="back mono"><a href="/">← all tools</a></p>
-    <h1 class="h1">bulk CSV → ZIP of QR PNGs</h1>
-    <p class="status mono">coming · v0.1</p>
-    <p class="lede">
-      This feature is on the v0.1 roadmap. The page exists so we can iterate on
-      the design and copy in parallel; the implementation lands next sprint.
-    </p>
+    <h1 class="h1">Bulk CSV → ZIP of QR PNGs</h1>
+    <p class="status mono ready">ready · v0.1</p>
+    <p class="lede">Each row in the CSV becomes one QR PNG. Provide a <code>name</code> column for filenames and a <code>data</code> column for QR contents — or pick which columns to use. The ZIP is built and downloaded entirely in your browser.</p>
+
+    <div class="layout">
+      <div class="controls">
+        <label class="field">
+          <span class="field-label">CSV (header row required)</span>
+          <textarea id="csv" class="io" rows="8" placeholder="name,data&#10;hello,https://oriz.in&#10;welcome,WIFI:T:WPA;S:Home;P:secret;;"></textarea>
+        </label>
+        <label class="field"><span class="field-label">Or upload .csv</span><input type="file" id="file" class="io" accept=".csv,text/csv" /></label>
+        <div class="col-row">
+          <label class="field"><span class="field-label">Filename column</span><select id="col-name" class="sel"></select></label>
+          <label class="field"><span class="field-label">QR data column</span><select id="col-data" class="sel"></select></label>
+        </div>
+        <label class="field"><span class="field-label">Size</span>
+          <select id="size" class="sel">
+            <option value="256">256 × 256</option>
+            <option value="512" selected>512 × 512</option>
+            <option value="1024">1024 × 1024</option>
+          </select>
+        </label>
+        <label class="field"><span class="field-label">Error correction</span>
+          <select id="ecl" class="sel">
+            <option value="L">L</option>
+            <option value="M" selected>M</option>
+            <option value="Q">Q</option>
+            <option value="H">H</option>
+          </select>
+        </label>
+        <div class="btn-row">
+          <button id="btn-go" class="btn-primary" disabled>Generate ZIP</button>
+        </div>
+      </div>
+      <div class="preview-wrap">
+        <p id="status" class="placeholder-hint mono">paste a CSV to begin</p>
+        <p id="errorEl" class="error-hint mono" hidden></p>
+        <pre id="log" class="log mono" hidden></pre>
+      </div>
+    </div>
   </article>
 </BaseLayout>
+
+<script>
+let QRCode: any = null
+async function loadQRCode() {
+  if (QRCode) return QRCode
+  return new Promise<any>((resolve, reject) => {
+    if ((window as any).QRCode) { QRCode = (window as any).QRCode; resolve(QRCode); return }
+    const s = document.createElement('script')
+    s.src = 'https://unpkg.com/qrcode@1.5.4/build/qrcode.min.js'
+    s.onload = () => { QRCode = (window as any).QRCode; resolve(QRCode) }
+    s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
+
+// CRC32 (used by ZIP records)
+const CRC_TABLE: Uint32Array = (() => {
+  const t = new Uint32Array(256)
+  for (let n = 0; n < 256; n++) {
+    let c = n
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1)
+    t[n] = c >>> 0
+  }
+  return t
+})()
+function crc32(buf: Uint8Array): number {
+  let c = 0xffffffff
+  for (let i = 0; i < buf.length; i++) c = (CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8)) >>> 0
+  return (c ^ 0xffffffff) >>> 0
+}
+
+// Minimal STORE-mode ZIP (no compression) — single Blob output.
+function buildZip(entries: { name: string; data: Uint8Array }[]): Blob {
+  const enc = new TextEncoder()
+  const local: Uint8Array[] = []
+  const central: Uint8Array[] = []
+  let offset = 0
+  for (const e of entries) {
+    const nameBytes = enc.encode(e.name)
+    const crc = crc32(e.data)
+    const size = e.data.length
+    // Local file header
+    const lfh = new Uint8Array(30 + nameBytes.length)
+    const lv = new DataView(lfh.buffer)
+    lv.setUint32(0, 0x04034b50, true)
+    lv.setUint16(4, 20, true) // version
+    lv.setUint16(6, 0, true) // flags
+    lv.setUint16(8, 0, true) // method = store
+    lv.setUint16(10, 0, true); lv.setUint16(12, 0, true) // time/date
+    lv.setUint32(14, crc, true)
+    lv.setUint32(18, size, true)
+    lv.setUint32(22, size, true)
+    lv.setUint16(26, nameBytes.length, true)
+    lv.setUint16(28, 0, true)
+    lfh.set(nameBytes, 30)
+    local.push(lfh, e.data)
+    // Central directory header
+    const cdh = new Uint8Array(46 + nameBytes.length)
+    const cv = new DataView(cdh.buffer)
+    cv.setUint32(0, 0x02014b50, true)
+    cv.setUint16(4, 20, true); cv.setUint16(6, 20, true)
+    cv.setUint16(8, 0, true); cv.setUint16(10, 0, true)
+    cv.setUint16(12, 0, true); cv.setUint16(14, 0, true)
+    cv.setUint32(16, crc, true)
+    cv.setUint32(20, size, true); cv.setUint32(24, size, true)
+    cv.setUint16(28, nameBytes.length, true)
+    cv.setUint16(30, 0, true); cv.setUint16(32, 0, true)
+    cv.setUint16(34, 0, true); cv.setUint16(36, 0, true)
+    cv.setUint32(38, 0, true)
+    cv.setUint32(42, offset, true)
+    cdh.set(nameBytes, 46)
+    central.push(cdh)
+    offset += lfh.length + e.data.length
+  }
+  // Concatenate local part
+  const localSize = local.reduce((a, b) => a + b.length, 0)
+  const centralSize = central.reduce((a, b) => a + b.length, 0)
+  const eocd = new Uint8Array(22)
+  const ev = new DataView(eocd.buffer)
+  ev.setUint32(0, 0x06054b50, true)
+  ev.setUint16(4, 0, true); ev.setUint16(6, 0, true)
+  ev.setUint16(8, entries.length, true); ev.setUint16(10, entries.length, true)
+  ev.setUint32(12, centralSize, true)
+  ev.setUint32(16, localSize, true)
+  ev.setUint16(20, 0, true)
+  return new Blob([...local, ...central, eocd], { type: 'application/zip' })
+}
+
+// Tiny CSV parser supporting quotes
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = []
+  let cur = '', row: string[] = [], inQ = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (inQ) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { cur += '"'; i++ } else inQ = false
+      } else cur += c
+    } else {
+      if (c === '"') inQ = true
+      else if (c === ',') { row.push(cur); cur = '' }
+      else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = '' }
+      else if (c === '\r') { /* skip */ }
+      else cur += c
+    }
+  }
+  if (cur.length || row.length) { row.push(cur); rows.push(row) }
+  return rows.filter(r => r.some(c => c.trim()))
+}
+
+const $ = (id: string) => document.getElementById(id) as any
+const csvEl = $('csv') as HTMLTextAreaElement
+const fileEl = $('file') as HTMLInputElement
+const colName = $('col-name') as HTMLSelectElement
+const colData = $('col-data') as HTMLSelectElement
+const sizeEl = $('size') as HTMLSelectElement
+const eclEl = $('ecl') as HTMLSelectElement
+const btnGo = $('btn-go') as HTMLButtonElement
+const statusEl = $('status') as HTMLParagraphElement
+const errorEl = $('errorEl') as HTMLParagraphElement
+const logEl = $('log') as HTMLPreElement
+
+let headers: string[] = []
+let rows: string[][] = []
+
+function refreshColumns() {
+  const text = csvEl.value
+  if (!text.trim()) {
+    headers = []; rows = []; colName.innerHTML = colData.innerHTML = ''
+    btnGo.disabled = true; statusEl.textContent = 'paste a CSV to begin'
+    return
+  }
+  const parsed = parseCSV(text)
+  if (!parsed.length) { errorEl.textContent = 'empty CSV'; errorEl.hidden = false; return }
+  headers = parsed[0]
+  rows = parsed.slice(1)
+  colName.innerHTML = colData.innerHTML = ''
+  headers.forEach((h, i) => {
+    const o1 = new Option(h || `col ${i + 1}`, String(i))
+    const o2 = new Option(h || `col ${i + 1}`, String(i))
+    colName.add(o1); colData.add(o2)
+  })
+  // Smart defaults
+  const nameIdx = headers.findIndex(h => /^(name|label|filename|id)$/i.test(h.trim()))
+  const dataIdx = headers.findIndex(h => /^(data|url|content|value|text)$/i.test(h.trim()))
+  colName.value = String(nameIdx >= 0 ? nameIdx : 0)
+  colData.value = String(dataIdx >= 0 ? dataIdx : Math.min(1, headers.length - 1))
+  statusEl.textContent = `${rows.length} row${rows.length === 1 ? '' : 's'} ready`
+  errorEl.hidden = true
+  btnGo.disabled = rows.length === 0
+}
+
+csvEl.addEventListener('input', refreshColumns)
+fileEl.addEventListener('change', async () => {
+  const f = fileEl.files?.[0]; if (!f) return
+  csvEl.value = await f.text()
+  refreshColumns()
+})
+
+function safeFilename(s: string, i: number): string {
+  let n = s.trim().replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)
+  if (!n) n = `qr-${i + 1}`
+  return n + '.png'
+}
+
+async function canvasToBytes(c: HTMLCanvasElement): Promise<Uint8Array> {
+  const blob: Blob = await new Promise(r => c.toBlob(b => r(b!), 'image/png')!)
+  return new Uint8Array(await blob.arrayBuffer())
+}
+
+btnGo.addEventListener('click', async () => {
+  errorEl.hidden = true; logEl.hidden = false; logEl.textContent = ''
+  btnGo.disabled = true
+  const QR = await loadQRCode()
+  const ni = parseInt(colName.value, 10)
+  const di = parseInt(colData.value, 10)
+  const size = parseInt(sizeEl.value, 10)
+  const ecl = eclEl.value
+  const off = document.createElement('canvas')
+  off.width = size; off.height = size
+  const entries: { name: string; data: Uint8Array }[] = []
+  const seen = new Set<string>()
+  try {
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i]
+      const data = (r[di] ?? '').trim()
+      if (!data) { logEl.textContent += `row ${i + 1}: skipped (empty data)\n`; continue }
+      let name = safeFilename(r[ni] ?? `qr-${i + 1}`, i)
+      let dedupe = 1
+      while (seen.has(name)) { name = safeFilename((r[ni] ?? `qr-${i + 1}`) + `-${++dedupe}`, i) }
+      seen.add(name)
+      await QR.toCanvas(off, data, { width: size, errorCorrectionLevel: ecl, margin: 2 })
+      const bytes = await canvasToBytes(off)
+      entries.push({ name, data: bytes })
+      if (i % 5 === 0 || i === rows.length - 1) {
+        statusEl.textContent = `rendered ${i + 1} / ${rows.length}`
+        await new Promise(r => setTimeout(r, 0))
+      }
+    }
+    if (!entries.length) throw new Error('no rows produced any QR')
+    const zip = buildZip(entries)
+    const url = URL.createObjectURL(zip)
+    const a = document.createElement('a'); a.href = url; a.download = 'qr-bundle.zip'; a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+    statusEl.textContent = `done · ${entries.length} QR(s) in ZIP`
+    logEl.textContent += `ZIP size: ${(zip.size / 1024).toFixed(1)} KB\n`
+  } catch (e: any) {
+    errorEl.textContent = `Error: ${e?.message ?? String(e)}`; errorEl.hidden = false
+  } finally {
+    btnGo.disabled = false
+  }
+})
+</script>
 
 <style>
   .tool { padding-block: 0 2rem; }
@@ -19,20 +266,24 @@ import BaseLayout from '~/layouts/BaseLayout.astro'
   .back a { color: var(--muted); text-decoration: none; }
   .back a:hover { color: var(--ink); }
   .h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(1.75rem, 4vw, 2.5rem); margin: 0 0 0.5rem; line-height: 1.1; }
-  .status { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 2rem; }
+  .status { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 1rem; }
   .status.ready { color: var(--accent); }
-  .lede { font-size: 1rem; color: var(--muted); line-height: 1.6; max-width: 56ch; }
-  .placeholder { max-width: 60ch; }
-  .placeholder p { color: var(--muted); margin: 0 0 1rem; }
-  .io {
-    width: 100%;
-    padding: 1rem;
-    background: var(--paper-2);
-    border: 1px solid var(--rule);
-    color: var(--ink);
-    font-family: var(--font-mono);
-    font-size: 0.875rem;
-    resize: vertical;
-  }
-  .hint { font-size: 11px; color: var(--muted); margin-top: 0.75rem; }
+  .lede { font-size: 1rem; color: var(--muted); line-height: 1.6; max-width: 56ch; margin: 0 0 2rem; }
+  .lede code { background: var(--paper-2); padding: 0 .3rem; }
+  .layout { display: grid; grid-template-columns: 1fr; gap: 2rem; }
+  @media (min-width: 700px) { .layout { grid-template-columns: 1fr 1fr; align-items: start; } }
+  .controls { display: flex; flex-direction: column; gap: 1rem; }
+  .field { display: flex; flex-direction: column; gap: 0.3rem; }
+  .field-label { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; font-family: var(--font-mono); }
+  .io, .sel { width: 100%; padding: 0.6rem 0.85rem; background: var(--paper-2); border: 1px solid var(--rule); color: var(--ink); font-family: var(--font-mono); font-size: 0.875rem; }
+  .io:focus, .sel:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+  textarea.io { resize: vertical; }
+  .col-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .btn-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  .btn-primary { padding: 0.5rem 1.25rem; font-family: var(--font-mono); font-size: 0.875rem; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .preview-wrap { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; min-height: 260px; border: 1px solid var(--rule); background: var(--paper-2); padding: 1.5rem; gap: 0.75rem; }
+  .placeholder-hint { font-size: 12px; color: var(--muted); letter-spacing: 0.08em; margin: 0; text-align: center; }
+  .error-hint { font-size: 12px; color: #dc2626; margin: 0; text-align: center; }
+  .log { font-size: 11px; color: var(--muted); white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 200px; overflow: auto; }
 </style>

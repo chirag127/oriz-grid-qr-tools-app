@@ -1,17 +1,133 @@
 ---
 import BaseLayout from '~/layouts/BaseLayout.astro'
 ---
-<BaseLayout title="QR email / SMS / phone — Oriz QR & Barcode Tools" description="QR email / SMS / phone — runs in your browser. Part of Oriz QR & Barcode Tools.">
+<BaseLayout title="QR email / SMS / phone — Oriz QR & Barcode Tools" description="Encode a mailto / SMS / tel link as a QR. Pre-fill recipient, subject, body — scan to open the compose screen. Runs entirely in your browser.">
   <article class="tool">
     <p class="back mono"><a href="/">← all tools</a></p>
     <h1 class="h1">QR email / SMS / phone</h1>
-    <p class="status mono">coming · v0.1</p>
-    <p class="lede">
-      This feature is on the v0.1 roadmap. The page exists so we can iterate on
-      the design and copy in parallel; the implementation lands next sprint.
-    </p>
+    <p class="status mono ready">ready · v0.1</p>
+    <p class="lede">Encode <code>mailto:</code>, <code>sms:</code>, or <code>tel:</code> URIs. Scan opens the compose / dial screen with fields pre-filled.</p>
+
+    <div class="layout">
+      <div class="controls">
+        <label class="field"><span class="field-label">Mode</span>
+          <select id="mode" class="sel">
+            <option value="email" selected>Email (mailto:)</option>
+            <option value="sms">SMS</option>
+            <option value="tel">Phone call (tel:)</option>
+          </select>
+        </label>
+        <label class="field"><span class="field-label" id="lab-to">Email address</span><input id="to" class="io" autocomplete="off" /></label>
+        <label class="field email-only"><span class="field-label">Subject</span><input id="subj" class="io" /></label>
+        <label class="field msg-only"><span class="field-label">Body / message</span><textarea id="body" class="io" rows="3"></textarea></label>
+        <div class="btn-row">
+          <button id="btn-png" class="btn-primary" disabled>Download PNG</button>
+          <button id="btn-svg" class="btn-secondary" disabled>Download SVG</button>
+        </div>
+        <p class="hint mono" id="payload-preview"></p>
+      </div>
+      <div class="preview-wrap">
+        <canvas id="qr-canvas" width="256" height="256"></canvas>
+        <p id="qr-placeholder" class="placeholder-hint mono">enter a recipient to generate</p>
+        <p id="qr-error" class="error-hint mono" hidden></p>
+      </div>
+    </div>
   </article>
 </BaseLayout>
+
+<script>
+let QRCode: any = null
+async function loadQRCode() {
+  if (QRCode) return QRCode
+  return new Promise<any>((resolve, reject) => {
+    if ((window as any).QRCode) { QRCode = (window as any).QRCode; resolve(QRCode); return }
+    const s = document.createElement('script')
+    s.src = 'https://unpkg.com/qrcode@1.5.4/build/qrcode.min.js'
+    s.onload = () => { QRCode = (window as any).QRCode; resolve(QRCode) }
+    s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
+
+const mode = document.getElementById('mode') as HTMLSelectElement
+const toEl = document.getElementById('to') as HTMLInputElement
+const subj = document.getElementById('subj') as HTMLInputElement
+const body = document.getElementById('body') as HTMLTextAreaElement
+const labTo = document.getElementById('lab-to') as HTMLSpanElement
+const emailOnly = document.querySelectorAll<HTMLElement>('.email-only')
+const msgOnly = document.querySelectorAll<HTMLElement>('.msg-only')
+const canvas = document.getElementById('qr-canvas') as HTMLCanvasElement
+const placeholder = document.getElementById('qr-placeholder') as HTMLParagraphElement
+const errorEl = document.getElementById('qr-error') as HTMLParagraphElement
+const preview = document.getElementById('payload-preview') as HTMLParagraphElement
+const btnPng = document.getElementById('btn-png') as HTMLButtonElement
+const btnSvg = document.getElementById('btn-svg') as HTMLButtonElement
+let lastSvg = ''
+let timer: ReturnType<typeof setTimeout>
+
+function payload() {
+  const m = mode.value
+  const t = toEl.value.trim()
+  if (!t) return ''
+  if (m === 'email') {
+    const params = new URLSearchParams()
+    if (subj.value) params.set('subject', subj.value)
+    if (body.value) params.set('body', body.value)
+    const q = params.toString()
+    return 'mailto:' + t + (q ? '?' + q : '')
+  }
+  if (m === 'sms') {
+    const num = t.replace(/[^+\d]/g, '')
+    return body.value ? `sms:${num}?body=${encodeURIComponent(body.value)}` : `sms:${num}`
+  }
+  return 'tel:' + t.replace(/[^+\d]/g, '')
+}
+
+function updateUI() {
+  const m = mode.value
+  labTo.textContent = m === 'email' ? 'Email address' : 'Phone number'
+  emailOnly.forEach(el => (el.style.display = m === 'email' ? '' : 'none'))
+  msgOnly.forEach(el => (el.style.display = m === 'tel' ? 'none' : ''))
+}
+
+async function gen() {
+  const data = payload()
+  preview.textContent = data
+  if (!data) {
+    placeholder.hidden = false; errorEl.hidden = true
+    canvas.style.display = 'none'
+    btnPng.disabled = btnSvg.disabled = true
+    return
+  }
+  try {
+    const QR = await loadQRCode()
+    await QR.toCanvas(canvas, data, { width: 256, errorCorrectionLevel: 'M', margin: 2 })
+    lastSvg = await QR.toString(data, { type: 'svg', width: 256, errorCorrectionLevel: 'M', margin: 2 })
+    placeholder.hidden = true; errorEl.hidden = true
+    canvas.style.display = 'block'
+    btnPng.disabled = btnSvg.disabled = false
+  } catch (e: any) {
+    errorEl.textContent = `Error: ${e?.message ?? String(e)}`; errorEl.hidden = false
+    placeholder.hidden = true; canvas.style.display = 'none'
+  }
+}
+
+const schedule = () => { clearTimeout(timer); timer = setTimeout(gen, 150) }
+mode.addEventListener('change', () => { updateUI(); gen() })
+;[toEl, subj, body].forEach(e => e.addEventListener('input', schedule))
+
+btnPng.addEventListener('click', () => {
+  const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = 'qr-link.png'; a.click()
+})
+btnSvg.addEventListener('click', () => {
+  const blob = new Blob([lastSvg], { type: 'image/svg+xml' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a'); a.href = url; a.download = 'qr-link.svg'; a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+})
+
+updateUI()
+</script>
 
 <style>
   .tool { padding-block: 0 2rem; }
@@ -19,20 +135,26 @@ import BaseLayout from '~/layouts/BaseLayout.astro'
   .back a { color: var(--muted); text-decoration: none; }
   .back a:hover { color: var(--ink); }
   .h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(1.75rem, 4vw, 2.5rem); margin: 0 0 0.5rem; line-height: 1.1; }
-  .status { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 2rem; }
+  .status { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 1rem; }
   .status.ready { color: var(--accent); }
-  .lede { font-size: 1rem; color: var(--muted); line-height: 1.6; max-width: 56ch; }
-  .placeholder { max-width: 60ch; }
-  .placeholder p { color: var(--muted); margin: 0 0 1rem; }
-  .io {
-    width: 100%;
-    padding: 1rem;
-    background: var(--paper-2);
-    border: 1px solid var(--rule);
-    color: var(--ink);
-    font-family: var(--font-mono);
-    font-size: 0.875rem;
-    resize: vertical;
-  }
-  .hint { font-size: 11px; color: var(--muted); margin-top: 0.75rem; }
+  .lede { font-size: 1rem; color: var(--muted); line-height: 1.6; max-width: 56ch; margin: 0 0 2rem; }
+  .lede code { background: var(--paper-2); padding: 0 .3rem; }
+  .layout { display: grid; grid-template-columns: 1fr; gap: 2rem; }
+  @media (min-width: 700px) { .layout { grid-template-columns: 1fr 1fr; align-items: start; } }
+  .controls { display: flex; flex-direction: column; gap: 1rem; }
+  .field { display: flex; flex-direction: column; gap: 0.3rem; }
+  .field-label { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; font-family: var(--font-mono); }
+  .io, .sel { width: 100%; padding: 0.6rem 0.85rem; background: var(--paper-2); border: 1px solid var(--rule); color: var(--ink); font-family: var(--font-mono); font-size: 0.875rem; }
+  .io:focus, .sel:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+  textarea.io { resize: vertical; }
+  .btn-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  .btn-primary, .btn-secondary { padding: 0.5rem 1.25rem; font-family: var(--font-mono); font-size: 0.875rem; border: 1px solid var(--rule); cursor: pointer; }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-secondary { background: var(--paper-2); color: var(--ink); }
+  .btn-primary:disabled, .btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .hint { font-size: 11px; color: var(--muted); word-break: break-all; margin: 0.5rem 0 0; }
+  .preview-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 260px; border: 1px solid var(--rule); background: var(--paper-2); padding: 1.5rem; }
+  #qr-canvas { display: none; max-width: 100%; image-rendering: pixelated; }
+  .placeholder-hint { font-size: 12px; color: var(--muted); letter-spacing: 0.08em; margin: 0; text-align: center; }
+  .error-hint { font-size: 12px; color: #dc2626; margin: 0; text-align: center; }
 </style>

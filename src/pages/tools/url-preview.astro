@@ -1,0 +1,206 @@
+---
+import BaseLayout from '~/layouts/BaseLayout.astro'
+---
+<BaseLayout title="URL Shortener Preview — Oriz QR & Barcode Tools" description="Check where a shortened URL redirects before clicking it. Client-side fetch via a CORS proxy — nothing is stored.">
+  <article class="tool">
+    <p class="back mono"><a href="/">← all tools</a></p>
+    <h1 class="h1">URL Shortener Preview</h1>
+    <p class="status mono ready">ready · v0.1</p>
+    <p class="lede">Paste a short URL and see where it actually goes — before you click it.</p>
+
+    <div class="form-wrap">
+      <label class="field">
+        <span class="field-label">Short URL</span>
+        <div class="input-row">
+          <input id="url-input" class="io" type="url" placeholder="https://bit.ly/…" autocomplete="off" spellcheck="false" />
+          <button id="btn-check" class="btn-primary">Check</button>
+        </div>
+      </label>
+    </div>
+
+    <div id="result-wrap" class="result-wrap" hidden>
+      <div id="state-loading" class="result-state" hidden>
+        <p class="state-label mono">resolving…</p>
+      </div>
+
+      <div id="state-success" class="result-state" hidden>
+        <p class="state-label mono success">resolved</p>
+        <div class="chain-wrap" id="chain-wrap"></div>
+        <div class="final-wrap">
+          <p class="final-label mono">final destination</p>
+          <div class="result-box">
+            <a id="final-url" href="#" target="_blank" rel="noopener noreferrer" class="result-link"></a>
+          </div>
+          <div class="action-row">
+            <button id="btn-copy" class="btn-secondary">Copy URL</button>
+            <span id="copy-confirm" class="copy-confirm mono" hidden>copied!</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="state-fail" class="result-state" hidden>
+        <p class="state-label mono fail">could not resolve</p>
+        <p id="fail-msg" class="state-hint"></p>
+        <p class="state-hint hint-small">Note: some services block cross-origin requests. Try opening the URL directly if this fails.</p>
+      </div>
+    </div>
+  </article>
+</BaseLayout>
+
+<script>
+const urlInput = document.getElementById('url-input') as HTMLInputElement
+const btnCheck = document.getElementById('btn-check') as HTMLButtonElement
+const resultWrap = document.getElementById('result-wrap') as HTMLDivElement
+const stateLoading = document.getElementById('state-loading') as HTMLDivElement
+const stateSuccess = document.getElementById('state-success') as HTMLDivElement
+const stateFail = document.getElementById('state-fail') as HTMLDivElement
+const chainWrap = document.getElementById('chain-wrap') as HTMLDivElement
+const finalUrl = document.getElementById('final-url') as HTMLAnchorElement
+const failMsg = document.getElementById('fail-msg') as HTMLParagraphElement
+const btnCopy = document.getElementById('btn-copy') as HTMLButtonElement
+const copyConfirm = document.getElementById('copy-confirm') as HTMLSpanElement
+
+function showState(s: 'loading' | 'success' | 'fail') {
+  resultWrap.hidden = false
+  stateLoading.hidden = s !== 'loading'
+  stateSuccess.hidden = s !== 'success'
+  stateFail.hidden = s !== 'fail'
+}
+
+// We use the allorigins CORS proxy to follow redirects and get the final URL.
+// allorigins returns the final URL in the JSON response.
+async function resolveUrl(url: string): Promise<{ finalUrl: string; hops: string[] }> {
+  // Strategy 1: use allorigins which returns resolved URL info
+  const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`
+  const res = await fetch(proxy, { signal: AbortSignal.timeout(10000) })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const data = await res.json()
+
+  // allorigins gives us the final URL after redirects
+  const resolved = data?.url ?? url
+  const hops: string[] = []
+  if (resolved !== url) hops.push(url)
+
+  return { finalUrl: resolved, hops }
+}
+
+async function checkUrl() {
+  const raw = urlInput.value.trim()
+  if (!raw) { urlInput.focus(); return }
+
+  let url = raw
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url
+
+  showState('loading')
+  chainWrap.innerHTML = ''
+
+  try {
+    const result = await resolveUrl(url)
+    const dest = result.finalUrl || url
+
+    // Show hops if any
+    if (result.hops.length > 0) {
+      for (const hop of result.hops) {
+        const p = document.createElement('div')
+        p.className = 'hop'
+        p.textContent = hop
+        chainWrap.appendChild(p)
+      }
+      const arrow = document.createElement('div')
+      arrow.className = 'hop-arrow mono'
+      arrow.textContent = '↓'
+      chainWrap.appendChild(arrow)
+    }
+
+    finalUrl.href = dest
+    finalUrl.textContent = dest
+    showState('success')
+  } catch (err: any) {
+    failMsg.textContent = err?.message ?? String(err)
+    showState('fail')
+  }
+}
+
+btnCheck.addEventListener('click', checkUrl)
+urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') checkUrl() })
+
+btnCopy.addEventListener('click', async () => {
+  const text = finalUrl.href
+  await navigator.clipboard.writeText(text)
+  copyConfirm.hidden = false
+  setTimeout(() => { copyConfirm.hidden = true }, 2000)
+})
+</script>
+
+<style>
+  .tool { padding-block: 0 2rem; }
+  .back { font-size: 12px; margin: 0 0 2rem; }
+  .back a { color: var(--muted); text-decoration: none; }
+  .back a:hover { color: var(--ink); }
+  .h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(1.75rem, 4vw, 2.5rem); margin: 0 0 0.5rem; line-height: 1.1; }
+  .status { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 0.5rem; }
+  .status.ready { color: var(--accent); }
+  .lede { font-size: 1rem; color: var(--muted); line-height: 1.6; max-width: 56ch; margin: 0 0 2rem; }
+
+  .form-wrap { max-width: 56ch; }
+  .field { display: flex; flex-direction: column; gap: 0.35rem; }
+  .field-label { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; font-family: var(--font-mono); }
+
+  .input-row { display: flex; gap: 0; }
+  .io {
+    flex: 1;
+    padding: 0.625rem 0.875rem;
+    background: var(--paper-2);
+    border: 1px solid var(--rule);
+    border-right: none;
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    min-width: 0;
+  }
+  .io:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .btn-primary {
+    padding: 0.625rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 120ms;
+    flex-shrink: 0;
+  }
+  .btn-primary:hover { background: #6d28d9; }
+
+  .result-wrap { max-width: 56ch; margin-top: 2rem; }
+  .result-state {}
+  .state-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0 0 1rem; }
+  .state-label.success { color: var(--accent); }
+  .state-label.fail { color: #dc2626; }
+  .state-hint { font-size: 0.875rem; color: var(--muted); margin: 0 0 0.5rem; line-height: 1.6; }
+  .hint-small { font-size: 0.8125rem; margin-top: 0.75rem; }
+
+  .chain-wrap { margin-bottom: 1rem; }
+  .hop { font-family: var(--font-mono); font-size: 0.8125rem; color: var(--muted); padding: 0.4rem 0.75rem; border: 1px solid var(--rule); background: var(--paper-2); margin-bottom: 2px; word-break: break-all; }
+  .hop-arrow { font-size: 1.25rem; color: var(--muted); text-align: center; margin: 0.25rem 0; }
+
+  .final-label { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; font-family: var(--font-mono); margin: 0 0 0.5rem; }
+  .result-box { background: var(--paper-2); border: 1px solid var(--rule); padding: 0.75rem 1rem; margin-bottom: 0.75rem; overflow-x: auto; }
+  .result-link { font-family: var(--font-mono); font-size: 0.875rem; word-break: break-all; color: var(--accent); }
+
+  .action-row { display: flex; align-items: center; gap: 1rem; }
+  .btn-secondary {
+    padding: 0.4rem 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    border: 1px solid var(--rule);
+    background: var(--paper-2);
+    color: var(--ink);
+    cursor: pointer;
+    transition: background 120ms;
+  }
+  .btn-secondary:hover { background: var(--rule); color: var(--paper); }
+  .copy-confirm { font-size: 11px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; }
+</style>

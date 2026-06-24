@@ -1,17 +1,150 @@
 ---
 import BaseLayout from '~/layouts/BaseLayout.astro'
 ---
-<BaseLayout title="scan QR (webcam) — Oriz QR & Barcode Tools" description="scan QR (webcam) — runs in your browser. Part of Oriz QR & Barcode Tools.">
+<BaseLayout title="QR Decoder — Oriz QR & Barcode Tools" description="Decode QR codes from images. Upload a file or drag and drop. Uses jsQR — runs entirely in your browser.">
   <article class="tool">
     <p class="back mono"><a href="/">← all tools</a></p>
-    <h1 class="h1">scan QR (webcam)</h1>
-    <p class="status mono">coming · v0.1</p>
-    <p class="lede">
-      This feature is on the v0.1 roadmap. The page exists so we can iterate on
-      the design and copy in parallel; the implementation lands next sprint.
-    </p>
+    <h1 class="h1">QR Decoder</h1>
+    <p class="status mono ready">ready · v0.1</p>
+
+    <div class="layout">
+      <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="Drop image or click to upload">
+        <p class="drop-label mono">drag & drop an image here</p>
+        <p class="drop-or mono">— or —</p>
+        <label class="file-btn">
+          <span>Choose file</span>
+          <input type="file" id="file-input" accept="image/*" class="sr-only" />
+        </label>
+        <p class="drop-hint mono">PNG, JPG, WEBP, GIF — processed locally</p>
+        <canvas id="decode-canvas" hidden></canvas>
+      </div>
+
+      <div class="result-wrap">
+        <div id="result-pending" class="result-state">
+          <p class="state-label mono">no image loaded</p>
+        </div>
+        <div id="result-success" class="result-state" hidden>
+          <p class="state-label mono success">decoded</p>
+          <div class="result-box">
+            <pre id="result-text" class="result-pre"></pre>
+          </div>
+          <div class="action-row">
+            <button id="btn-copy" class="btn-primary">Copy to clipboard</button>
+            <span id="copy-confirm" class="copy-confirm mono" hidden>copied!</span>
+          </div>
+        </div>
+        <div id="result-fail" class="result-state" hidden>
+          <p class="state-label mono fail">no QR code found</p>
+          <p class="state-hint">Make sure the image contains a valid QR code and is not too blurry or cropped.</p>
+        </div>
+        <div id="result-loading" class="result-state" hidden>
+          <p class="state-label mono">decoding…</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="preview-wrap" hidden class="img-preview-wrap">
+      <img id="preview-img" alt="Uploaded QR image" class="preview-img" />
+    </div>
   </article>
 </BaseLayout>
+
+<script>
+// Load jsQR from CDN
+async function loadJsQR(): Promise<any> {
+  if ((window as any).jsQR) return (window as any).jsQR
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = 'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js'
+    s.onload = () => resolve((window as any).jsQR)
+    s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
+
+const dropZone = document.getElementById('drop-zone') as HTMLDivElement
+const fileInput = document.getElementById('file-input') as HTMLInputElement
+const decodeCanvas = document.getElementById('decode-canvas') as HTMLCanvasElement
+const previewWrap = document.getElementById('preview-wrap') as HTMLDivElement
+const previewImg = document.getElementById('preview-img') as HTMLImageElement
+
+const statePending = document.getElementById('result-pending') as HTMLDivElement
+const stateSuccess = document.getElementById('result-success') as HTMLDivElement
+const stateFail = document.getElementById('result-fail') as HTMLDivElement
+const stateLoading = document.getElementById('result-loading') as HTMLDivElement
+const resultText = document.getElementById('result-text') as HTMLPreElement
+const btnCopy = document.getElementById('btn-copy') as HTMLButtonElement
+const copyConfirm = document.getElementById('copy-confirm') as HTMLSpanElement
+
+function showState(state: 'pending' | 'success' | 'fail' | 'loading') {
+  statePending.hidden = state !== 'pending'
+  stateSuccess.hidden = state !== 'success'
+  stateFail.hidden = state !== 'fail'
+  stateLoading.hidden = state !== 'loading'
+}
+
+async function decodeFile(file: File) {
+  if (!file.type.startsWith('image/')) return
+  showState('loading')
+
+  const url = URL.createObjectURL(file)
+  previewImg.src = url
+  previewWrap.hidden = false
+
+  const img = new Image()
+  img.onload = async () => {
+    const ctx = decodeCanvas.getContext('2d')!
+    decodeCanvas.width = img.naturalWidth
+    decodeCanvas.height = img.naturalHeight
+    ctx.drawImage(img, 0, 0)
+
+    const imageData = ctx.getImageData(0, 0, decodeCanvas.width, decodeCanvas.height)
+    URL.revokeObjectURL(url)
+
+    try {
+      const jsQR = await loadJsQR()
+      const result = jsQR(imageData.data, imageData.width, imageData.height)
+      if (result) {
+        resultText.textContent = result.data
+        showState('success')
+      } else {
+        showState('fail')
+      }
+    } catch {
+      showState('fail')
+    }
+  }
+  img.onerror = () => showState('fail')
+  img.src = url
+}
+
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files?.[0]
+  if (file) decodeFile(file)
+})
+
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault()
+  dropZone.classList.add('drag-over')
+})
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'))
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault()
+  dropZone.classList.remove('drag-over')
+  const file = e.dataTransfer?.files?.[0]
+  if (file) decodeFile(file)
+})
+dropZone.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') fileInput.click()
+})
+
+btnCopy.addEventListener('click', async () => {
+  const text = resultText.textContent ?? ''
+  await navigator.clipboard.writeText(text)
+  copyConfirm.hidden = false
+  setTimeout(() => { copyConfirm.hidden = true }, 2000)
+})
+</script>
 
 <style>
   .tool { padding-block: 0 2rem; }
@@ -21,18 +154,95 @@ import BaseLayout from '~/layouts/BaseLayout.astro'
   .h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(1.75rem, 4vw, 2.5rem); margin: 0 0 0.5rem; line-height: 1.1; }
   .status { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 2rem; }
   .status.ready { color: var(--accent); }
-  .lede { font-size: 1rem; color: var(--muted); line-height: 1.6; max-width: 56ch; }
-  .placeholder { max-width: 60ch; }
-  .placeholder p { color: var(--muted); margin: 0 0 1rem; }
-  .io {
-    width: 100%;
-    padding: 1rem;
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+  @media (min-width: 700px) {
+    .layout { grid-template-columns: 1fr 1fr; align-items: start; }
+  }
+
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+
+  .drop-zone {
+    border: 2px dashed var(--rule);
+    padding: 2.5rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+    transition: border-color 150ms, background 150ms;
     background: var(--paper-2);
+    outline: none;
+  }
+  .drop-zone:hover, .drop-zone:focus, .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 5%, var(--paper) 95%);
+  }
+  .drop-label { font-size: 0.9375rem; color: var(--ink); margin: 0; }
+  .drop-or { font-size: 12px; color: var(--muted); margin: 0; }
+  .drop-hint { font-size: 11px; color: var(--muted); margin: 0; letter-spacing: 0.06em; }
+
+  .file-btn {
+    display: inline-block;
+    padding: 0.4rem 1rem;
     border: 1px solid var(--rule);
-    color: var(--ink);
     font-family: var(--font-mono);
     font-size: 0.875rem;
-    resize: vertical;
+    cursor: pointer;
+    background: var(--paper);
+    color: var(--ink);
+    transition: background 120ms;
   }
-  .hint { font-size: 11px; color: var(--muted); margin-top: 0.75rem; }
+  .file-btn:hover { background: var(--paper-2); }
+
+  .result-wrap {
+    border: 1px solid var(--rule);
+    padding: 1.5rem;
+    background: var(--paper-2);
+    min-height: 120px;
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .result-state { width: 100%; }
+  .state-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0 0 1rem; }
+  .state-label.success { color: var(--accent); }
+  .state-label.fail { color: #dc2626; }
+  .state-hint { font-size: 0.875rem; color: var(--muted); margin: 0; line-height: 1.6; }
+
+  .result-box {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    overflow-x: auto;
+  }
+  .result-pre {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .action-row { display: flex; align-items: center; gap: 1rem; }
+  .btn-primary {
+    padding: 0.4rem 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    transition: background 120ms;
+  }
+  .btn-primary:hover { background: #6d28d9; }
+  .copy-confirm { font-size: 11px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; }
+
+  .img-preview-wrap { margin-top: 1.5rem; }
+  .preview-img { max-width: 100%; max-height: 300px; border: 1px solid var(--rule); display: block; }
 </style>

@@ -1,5 +1,6 @@
 ---
 import '~/styles/global.css'
+import FamilySidebar from '@chirag127/astro-shell/components/FamilySidebar.astro'
 
 interface Props {
   title?: string
@@ -38,7 +39,21 @@ const canonical = new URL(Astro.url.pathname, 'https://qr.oriz.in').toString()
         <a href="https://account.oriz.in/sign-in?return=https://qr.oriz.in/">sign in</a>
       </nav>
     </header>
-    <main id="main"><slot /></main>
+    <div class="oriz-shell">
+      <FamilySidebar slug="oriz-grid-qr-tools-app" title="QR Tools">
+        <a slot="tools" href="/tools/qr-text/">QR generator (text / URL)</a>
+        <a slot="tools" href="/tools/qr-scan/">QR decoder (camera / file)</a>
+        <a slot="tools" href="/tools/barcode/">Barcode generator</a>
+        <a slot="tools" href="/tools/url-preview/">URL shortener preview</a>
+        <a slot="tools" href="/tools/qr-vcard/">QR vCard</a>
+        <a slot="tools" href="/tools/qr-wifi/">QR WiFi credentials</a>
+        <a slot="tools" href="/tools/qr-email/">QR email / SMS / phone</a>
+        <a slot="tools" href="/tools/qr-geo/">QR geo / event</a>
+        <a slot="tools" href="/tools/qr-styled/">Styled QR with logo</a>
+        <a slot="tools" href="/tools/qr-bulk/">Bulk CSV → ZIP of QR PNGs</a>
+      </FamilySidebar>
+      <main id="main" class="oriz-main"><slot /></main>
+    </div>
     <footer class="site">
       <span>Oriz QR & Barcode Tools · part of the <a href="https://oriz.in">oriz</a> family · runs in your browser</span>
       <span>
